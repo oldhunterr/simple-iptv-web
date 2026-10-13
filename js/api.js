@@ -456,7 +456,7 @@
         }
         if (!s.cover && e.logo) { s.cover = e.logo; s.poster = e.logo; }
         s.m3u_episodes.push({
-          id: hashStr(e.url), stream_url: e.url,
+          id: hashStr(e.url), stream_url: applyWafBypass(e.url),
           episode_num: p ? p.episode : s.m3u_episodes.length + 1,
           season_num: p ? p.season : 1,
           title: (p && p.epTitle) ? p.epTitle : title,
@@ -468,7 +468,8 @@
 
       var isMovie = kind === "movies";
       out[kind].items.push({
-        id: hashStr(e.url), stream_id: hashStr(e.url), stream_url: e.url,
+        id: hashStr(e.url), stream_id: hashStr(e.url),
+        stream_url: isMovie ? applyWafBypass(e.url) : e.url,
         title: title, name: title, type: isMovie ? "movies" : "live",
         poster: e.logo, stream_icon: e.logo, category_id: catId,
         genre: e.group || "",
