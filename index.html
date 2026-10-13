@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark-glass">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simple IPTV</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='18' font-size='18'>📺</text></svg>" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="app" class="app">
+
+    <!-- ======================= SIDEBAR ======================= -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-logo" data-icon="tv"></div>
+        <div class="brand-text">
+          <h1>Simple IPTV</h1>
+          <p>HTML · jQuery · CSS</p>
+        </div>
+      </div>
+
+      <nav class="nav" id="section-nav">
+        <button class="nav-item" data-section="live"><span class="ico" data-icon="tv"></span><span class="lbl">Live TV</span><span class="count" id="cnt-live">0</span></button>
+        <button class="nav-item" data-section="movies"><span class="ico" data-icon="film"></span><span class="lbl">Movies</span><span class="count" id="cnt-movies">0</span></button>
+        <button class="nav-item" data-section="series"><span class="ico" data-icon="clapper"></span><span class="lbl">Series</span><span class="count" id="cnt-series">0</span></button>
+        <button class="nav-item" data-section="favorites"><span class="ico" data-icon="heart"></span><span class="lbl">Favorites</span><span class="count" id="cnt-favorites">0</span></button>
+        <button class="nav-item" data-section="history"><span class="ico" data-icon="history"></span><span class="lbl">History</span><span class="count" id="cnt-history">0</span></button>
+      </nav>
+
+      <div class="cat-wrap" id="cat-wrap">
+        <div class="cat-search">
+          <span class="ico" data-icon="search"></span>
+          <input type="text" id="category-search" placeholder="Search categories…" autocomplete="off" />
+        </div>
+        <div class="cat-head"><span>Categories</span><span id="cat-count-label"></span></div>
+        <div class="cat-list" id="category-list"></div>
+      </div>
+
+      <div class="sidebar-foot">
+        <button class="btn-ghost full" id="btn-config"><span class="ico" data-icon="gear"></span><span>Connection</span></button>
+        <button class="btn-ghost full" id="btn-theme"><span class="ico" data-icon="palette"></span><span>Appearance</span></button>
+      </div>
+    </aside>
+
+    <!-- ======================= MAIN ======================= -->
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <div class="topbar-ico" data-icon="layers"></div>
+          <div>
+            <h2 id="current-category">All Categories</h2>
+            <span id="item-count" class="muted">0 items</span>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <div class="search-box">
+            <span class="ico" data-icon="search"></span>
+            <input type="text" id="catalog-search" placeholder="Search channels, movies, series…" autocomplete="off" />
+          </div>
+          <button class="btn-ghost" id="btn-filter" title="Filters"><span class="ico" data-icon="sliders"></span><span class="hide-sm">Filters</span><span class="badge" id="filter-badge" hidden>0</span></button>
+          <button class="btn-ghost" id="btn-sync" title="Sync / Refresh"><span class="ico" data-icon="refresh" id="sync-ico"></span><span class="hide-sm">Sync</span></button>
+        </div>
+      </header>
+
+      <!-- Quick filter pills -->
+      <div class="pills" id="quick-pills"></div>
+
+      <!-- Advanced filter drawer -->
+      <div class="drawer" id="filter-drawer" hidden>
+        <div class="drawer-head">
+          <div class="flex items-center gap-2">
+            <span class="chip-ico" data-icon="sliders"></span>
+            <strong>Advanced Filters</strong>
+            <span class="pill-active" id="filter-count-label" hidden></span>
+          </div>
+          <div class="flex items-center gap-3">
+            <button class="link" id="btn-reset-filters"><span class="ico" data-icon="rotate"></span> Reset</button>
+            <button class="icon-btn" id="btn-close-filter" data-icon="x"></button>
+          </div>
+        </div>
+        <div class="drawer-grid">
+          <div class="field-group">
+            <label>Stream Type</label>
+            <div class="seg" id="seg-stream-type">
+              <button data-v="all" class="on">All</button>
+              <button data-v="live">Live TV</button>
+              <button data-v="movies">Movies</button>
+              <button data-v="series">Series</button>
+            </div>
+            <label>Resolution</label>
+            <div class="seg" id="seg-resolution">
+              <button data-v="all" class="on">All</button>
+              <button data-v="4K">4K UHD</button>
+              <button data-v="1080p">1080p</button>
+              <button data-v="720p">720p</button>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label>Genre</label>
+            <div class="tags" id="genre-tags"></div>
+          </div>
+
+          <div class="field-group">
+            <label>Min Rating</label>
+            <div class="seg" id="seg-rating">
+              <button data-v="0" class="on">All</button>
+              <button data-v="5">5+</button>
+              <button data-v="7">7+</button>
+              <button data-v="8">8+</button>
+            </div>
+            <label>Release Year</label>
+            <div class="row">
+              <input type="number" id="year-min" min="1950" max="2030" value="1980" />
+              <span class="muted">–</span>
+              <input type="number" id="year-max" min="1950" max="2030" value="2030" />
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label>Watched Status</label>
+            <div class="seg" id="seg-watched">
+              <button data-v="all" class="on">All</button>
+              <button data-v="unwatched">Unwatched</button>
+              <button data-v="in-progress">In&nbsp;Progress</button>
+              <button data-v="watched">Watched</button>
+            </div>
+            <label>Sort Order</label>
+            <select id="sort-by" class="select">
+              <option value="default">Default Order</option>
+              <option value="name_asc">Title (A → Z)</option>
+              <option value="name_desc">Title (Z → A)</option>
+              <option value="rating_desc">Rating (High → Low)</option>
+              <option value="year_desc">Release Year (Newest)</option>
+              <option value="added_desc">Recently Added</option>
+            </select>
+            <label>Audio / Translation</label>
+            <div class="seg wrap" id="seg-audio">
+              <button data-v="all" class="on">All</button>
+              <button data-v="dubbed">مدبلج</button>
+              <button data-v="subtitled">مترجم</button>
+              <button data-v="arabic">Arabic</button>
+              <button data-v="english">English</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="content" id="content">
+        <div class="loading" id="loading">
+          <div class="spinner"></div>
+          <p>Loading catalog…</p>
+        </div>
+        <div class="grid" id="grid"></div>
+        <div class="empty" id="empty" hidden>
+          <p class="empty-title">No items found</p>
+          <p class="muted">Try adjusting your search or filters.</p>
+        </div>
+        <div class="history-view" id="history-view" hidden></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ======================= MODALS ======================= -->
+  <div class="modal" id="movie-modal" hidden></div>
+  <div class="modal" id="series-modal" hidden></div>
+
+  <!-- Player -->
+  <div class="player-modal" id="player-modal" hidden>
+    <div class="player-shell" id="player-shell">
+      <video id="video" playsinline></video>
+      <div class="player-ui" id="player-ui">
+        <div class="player-top">
+          <h3 id="player-title">—</h3>
+          <button class="round-btn" id="player-close" data-icon="x" title="Close"></button>
+        </div>
+        <div class="player-center" id="player-center">
+          <div class="play-circle" id="play-circle" data-icon="play"></div>
+        </div>
+        <div class="player-bottom">
+          <div class="seek-row">
+            <input type="range" id="seek" min="0" max="100" step="0.1" value="0" />
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-left">
+              <button class="icon-btn" id="btn-play" data-icon="play"></button>
+              <button class="icon-btn" id="btn-back10" data-icon="back10" title="Rewind 10s"></button>
+              <button class="icon-btn" id="btn-fwd10" data-icon="fwd10" title="Forward 10s"></button>
+              <div class="vol">
+                <button class="icon-btn" id="btn-mute" data-icon="volume"></button>
+                <input type="range" id="volume" min="0" max="1" step="0.05" value="1" />
+              </div>
+              <span class="time" id="time-display">00:00 / 00:00</span>
+            </div>
+            <div class="ctrl-right">
+              <select id="speed" class="select sm">
+                <option value="0.5">0.5x</option>
+                <option value="0.75">0.75x</option>
+                <option value="1" selected>1x</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2x</option>
+              </select>
+              <button class="icon-btn" id="btn-fs" data-icon="expand" title="Fullscreen"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="resume-banner" id="resume-banner" hidden>
+        <div class="rb-left">
+          <span class="ico lg" data-icon="rotate"></span>
+          <div>
+            <p class="rb-title">Resume Playback?</p>
+            <p class="muted">You stopped at <b id="resume-time">00:00</b></p>
+          </div>
+        </div>
+        <div class="rb-right">
+          <button class="btn-primary" id="btn-resume">Resume</button>
+          <button class="btn-ghost" id="btn-restart">Start Over</button>
+          <button class="icon-btn" id="btn-resume-x" data-icon="x"></button>
+        </div>
+      </div>
+      <button class="skip-btn" id="skip-btn" hidden></button>
+      <div class="player-error" id="player-error" hidden></div>
+    </div>
+  </div>
+
+  <!-- Appearance popover -->
+  <div class="popover" id="theme-popover" hidden>
+    <h4>Theme</h4>
+    <div class="theme-opts" id="theme-opts"></div>
+    <h4>Accent</h4>
+    <div class="accent-opts" id="accent-opts"></div>
+    <button class="link danger" id="btn-reset-data"><span class="ico" data-icon="trash"></span> Clear all saved data</button>
+  </div>
+
+  <!-- Connection / setup dialog -->
+  <div class="cfg-overlay" id="config-modal" hidden>
+    <div class="cfg-card">
+      <h2 id="cfg-title">Connect to your IPTV portal</h2>
+      <p class="muted" id="cfg-sub">Enter the Xtream Codes portal details. They are stored only in this browser.</p>
+
+      <label for="cfg-host">Portal URL</label>
+      <input type="text" id="cfg-host" placeholder="http://your-portal.example:8080" autocomplete="off" spellcheck="false" />
+
+      <div class="cfg-row">
+        <div>
+          <label for="cfg-user">Username</label>
+          <input type="text" id="cfg-user" placeholder="username" autocomplete="off" spellcheck="false" />
+        </div>
+        <div>
+          <label for="cfg-pass">Password</label>
+          <input type="password" id="cfg-pass" placeholder="password" autocomplete="off" />
+        </div>
+      </div>
+
+      <label for="cfg-tmdb">TMDB API key <span class="opt">optional — posters, plots, cast, episode info</span></label>
+      <input type="text" id="cfg-tmdb" placeholder="leave blank to disable metadata lookups" autocomplete="off" spellcheck="false" />
+
+      <label class="chk"><input type="checkbox" id="cfg-waf" /> <span>VOD compatibility mode <span class="opt">fixes movies/series that return 403 on some portals</span></span></label>
+      <label class="chk"><input type="checkbox" id="cfg-theme" /> <span>Plex theme songs on the series page</span></label>
+
+      <div class="cfg-status" id="cfg-status"></div>
+
+      <div class="cfg-actions">
+        <button class="btn-ghost" id="cfg-test">Test connection</button>
+        <span class="spacer"></span>
+        <button class="link" id="cfg-cancel">Cancel</button>
+        <button class="btn-primary" id="cfg-save">Save &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="vendor/jquery.min.js"></script>
+  <script src="vendor/hls.min.js"></script>
+  <script src="vendor/mpegts.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/icons.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

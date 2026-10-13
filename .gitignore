@@ -1,0 +1,10 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+# Local overrides — never commit real portal credentials
+js/config.local.js
+.env
+.env.*
