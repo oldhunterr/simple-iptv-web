@@ -24,7 +24,8 @@
     loaded: { live: false, movies: false, series: false },
     visible: CFG.gridBatch || 120,
     modalMovieTmdb: null,
-    modalSeriesTmdb: null
+    modalSeriesTmdb: null,
+    cfgSource: CFG.sourceType || "xtream"
   };
 
   var GENRES = ["Action","Adventure","Animation","Comedy","Crime","Documentary","Drama","Family","Fantasy","Horror","Mystery","Romance","Sci-Fi","Thriller"];
@@ -47,6 +48,17 @@
     t.hidden = false;
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.hidden = true; }, 3600);
+  }
+
+  function setLoadingText(t) {
+    var el = byId("loading-text");
+    if (el) el.textContent = t;
+  }
+
+  /* Stream URL for an item: M3U entries carry their own URL, Xtream items are built. */
+  function streamUrlOf(holder, kind, fallbackId, ext) {
+    if (holder && holder.stream_url) return holder.stream_url;
+    return API.buildStreamUrl(kind, fallbackId, ext);
   }
 
   /* ============================================================
@@ -80,9 +92,48 @@
   /* ============================================================
      DATA LOADING
      ============================================================ */
+  /* M3U source: one download populates live + movies + series at once.
+     De-duplicated so concurrent callers share a single download. */
+  var m3uInFlight = null;
+  function loadM3UPlaylistInto(force) {
+    if (m3uInFlight) return m3uInFlight;
+
+    byId("loading").hidden = false;
+    byId("grid").innerHTML = "";
+    byId("empty").hidden = true;
+    setLoadingText("Downloading playlist…");
+
+    m3uInFlight = API.loadM3UPlaylist(force, function (frac, count, msg) {
+      if (frac < 0) { setLoadingText(msg || "Downloading playlist…"); return; }
+      setLoadingText((msg || "Parsing playlist…") + " " + Math.round(frac * 100) + "%" +
+        (count ? "  ·  " + count.toLocaleString() + " entries" : ""));
+    }).then(function (catalog) {
+      S.data.live = catalog.live;
+      S.data.movies = catalog.movies;
+      S.data.series = catalog.series;
+      S.loaded = { live: true, movies: true, series: true };
+      byId("loading").hidden = true;
+      setLoadingText("Loading catalog…");
+      updateCounts();
+      buildCategoryList();
+      renderContent();
+    }).catch(function (err) {
+      byId("loading").hidden = true;
+      setLoadingText("Loading catalog…");
+      byId("grid").innerHTML = "";
+      byId("empty").hidden = false;
+      byId("empty").querySelector(".empty-title").textContent = "Could not load the playlist";
+      byId("empty").querySelector(".muted").textContent = String(err.message || err);
+    }).then(function (r) { m3uInFlight = null; return r; },
+            function (e) { m3uInFlight = null; throw e; });
+
+    return m3uInFlight;
+  }
+
   function loadSection(section, force) {
     if (section === "favorites" || section === "history") return Promise.resolve();
     if (!STORE.isConfigured()) { byId("loading").hidden = true; return Promise.resolve(); }
+    if (API.isM3U()) return loadM3UPlaylistInto(force);
     if (S.loaded[section] && !force) return Promise.resolve();
 
     byId("loading").hidden = false;
@@ -443,11 +494,12 @@
 
   function playLive(item) {
     var id = item.stream_id || item.id;
+    var ext = item.container_extension || "ts";
     PLAYER.open({
-      src: API.buildStreamUrl("live", id, "ts"),
+      src: streamUrlOf(item, "live", id, ext),
       title: item.name || item.title || "Live Stream",
       itemKey: "live_" + id, streamId: id, section: "live",
-      poster: item.stream_icon || item.poster, containerExtension: "ts"
+      poster: item.stream_icon || item.poster, containerExtension: ext
     });
   }
 
@@ -455,7 +507,7 @@
     var id = item.stream_id || item.id;
     var ext = item.container_extension || "mp4";
     PLAYER.open({
-      src: API.buildStreamUrl("movie", id, ext),
+      src: streamUrlOf(item, "movie", id, ext),
       title: item.name || item.title || "Movie",
       itemKey: "movies_" + id, streamId: id, section: "movies",
       poster: (tmdb && tmdb.poster) || item.stream_icon || item.poster,
@@ -470,7 +522,7 @@
     var title = series.name + " — S" + (seasonNum < 10 ? "0" : "") + seasonNum + "E" +
       (ep.episode_num < 10 ? "0" : "") + ep.episode_num + " · " + (ep.title || "Episode");
     PLAYER.open({
-      src: API.buildStreamUrl("series", ep.id, ext),
+      src: streamUrlOf(ep, "series", ep.id, ext),
       title: title,
       itemKey: "series_" + series.series_id + "_s" + seasonNum + "e" + ep.episode_num + "_" + ep.id,
       streamId: ep.id, section: "series",
@@ -605,6 +657,27 @@
   /* ============================================================
      SERIES MODAL
      ============================================================ */
+  /* M3U series carry their episodes inline — shape them like Xtream's series_info. */
+  function buildM3USeriesInfo(item) {
+    var eps = item.m3u_episodes || [];
+    var bySeason = {};
+    eps.forEach(function (e) {
+      var s = e.season_num || 1;
+      (bySeason[s] = bySeason[s] || []).push({
+        id: e.id, episode_num: e.episode_num, title: e.title,
+        container_extension: e.container_extension, info: e.info, stream_url: e.stream_url
+      });
+    });
+    Object.keys(bySeason).forEach(function (k) {
+      bySeason[k].sort(function (a, b) { return a.episode_num - b.episode_num; });
+    });
+    return {
+      info: { name: item.name, plot: item.plot || "", cover: item.cover },
+      seasons: Object.keys(bySeason).map(function (k) { return { season_number: Number(k) }; }),
+      episodes: bySeason
+    };
+  }
+
   function openSeriesModal(item) {
     var series = item.raw || item;
     var seriesId = series.series_id || item.series_id || item.id;
@@ -694,7 +767,11 @@
       });
     }
 
-    API.fetchSeriesInfo(seriesId).then(function (info) {
+    var infoPromise = item.m3u_episodes
+      ? Promise.resolve(buildM3USeriesInfo(item))
+      : API.fetchSeriesInfo(seriesId);
+
+    infoPromise.then(function (info) {
       seriesInfo = info || {};
       var seasons = computeSeasons(seriesInfo);
       selectedSeason = seasons.indexOf(1) !== -1 ? 1 : seasons[0];
@@ -836,36 +913,63 @@
     el.className = "cfg-status" + (cls ? " " + cls : "");
   }
 
+  function setCfgSource(t) {
+    S.cfgSource = t;
+    byId("cfg-source").querySelectorAll("button").forEach(function (b) {
+      b.classList.toggle("on", b.getAttribute("data-v") === t);
+    });
+    byId("cfg-xtream-fields").hidden = (t !== "xtream");
+    byId("cfg-m3u-fields").hidden = (t !== "m3u");
+  }
+
   function openConfig(firstRun) {
     var c = STORE.getConfig();
+    setCfgSource(c.sourceType || "xtream");
     byId("cfg-host").value = c.host || "";
     byId("cfg-user").value = c.username || "";
     byId("cfg-pass").value = c.password || "";
+    byId("cfg-m3u").value = c.m3uUrl || "";
     byId("cfg-tmdb").value = c.tmdbApiKey || "";
     byId("cfg-waf").checked = c.vodWafBypass !== false;
     byId("cfg-theme").checked = c.themeSongs !== false;
 
     byId("cfg-title").textContent = firstRun ? "Connect to your IPTV portal" : "Connection settings";
     byId("cfg-sub").textContent = firstRun
-      ? "Welcome! Enter your Xtream Codes portal details. They are stored only in this browser."
-      : "Update the Xtream Codes portal details used by this app.";
+      ? "Choose how to load your channels. Details are stored only in this browser."
+      : "Update the source this app loads its channels from.";
     byId("cfg-cancel").hidden = !!firstRun;
     setCfgStatus("", "");
     byId("config-modal").hidden = false;
-    setTimeout(function () { byId("cfg-host").focus(); }, 60);
+    setTimeout(function () {
+      var f = S.cfgSource === "m3u" ? byId("cfg-m3u") : byId("cfg-host");
+      if (f) f.focus();
+    }, 60);
   }
 
   function closeConfig() { byId("config-modal").hidden = true; }
 
   function formConfig() {
     return {
+      sourceType: S.cfgSource || "xtream",
       host: byId("cfg-host").value.trim(),
       username: byId("cfg-user").value.trim(),
       password: byId("cfg-pass").value,
+      m3uUrl: byId("cfg-m3u").value.trim(),
       tmdbApiKey: byId("cfg-tmdb").value.trim(),
       vodWafBypass: !!byId("cfg-waf").checked,
       themeSongs: !!byId("cfg-theme").checked
     };
+  }
+
+  function validateConfig(f) {
+    if (f.sourceType === "m3u") {
+      if (!f.m3uUrl) return "Enter an M3U playlist URL.";
+      if (!/^https?:\/\//i.test(f.m3uUrl)) return "The playlist URL must start with http:// or https://";
+      return null;
+    }
+    if (!f.host) return "Portal URL is required.";
+    if (!f.username) return "Username is required.";
+    return null;
   }
 
   /* Wipe cached catalogs (cache keys don't include the host) and re-fetch. */
@@ -878,6 +982,10 @@
     byId("catalog-search").value = "";
     updateCounts();
     buildCategoryList();
+
+    // One playlist download populates every section — no need to warm them separately.
+    if (API.isM3U()) { loadM3UPlaylistInto(true); return; }
+
     if (S.section === "favorites" || S.section === "history") { renderContent(); }
     else { loadSection(S.section, true); }
     setTimeout(function () {
@@ -891,23 +999,33 @@
     byId("btn-config").onclick = function () { openConfig(false); };
     byId("cfg-cancel").onclick = closeConfig;
 
+    byId("cfg-source").addEventListener("click", function (e) {
+      var b = e.target.closest("button");
+      if (b) { setCfgSource(b.getAttribute("data-v")); setCfgStatus("", ""); }
+    });
+
     byId("cfg-test").onclick = function () {
       var f = formConfig();
-      if (!f.host || !f.username) { setCfgStatus("Portal URL and username are required.", "err"); return; }
-      setCfgStatus("Testing connection…", "busy");
+      var err = validateConfig(f);
+      if (err) { setCfgStatus(err, "err"); return; }
+      if (f.sourceType === "m3u") setCfgStatus("Loading playlist…", "busy");
+      else setCfgStatus("Testing connection…", "busy");
       API.testConnection(f).then(function (res) { setCfgStatus(res.message, res.ok ? "ok" : "err"); });
     };
 
     byId("cfg-save").onclick = function () {
       var f = formConfig();
-      if (!f.host || !f.username) { setCfgStatus("Portal URL and username are required.", "err"); return; }
+      var err = validateConfig(f);
+      if (err) { setCfgStatus(err, "err"); return; }
       STORE.saveConfig(f);
       closeConfig();
-      toast("Connection saved");
+      toast("Saved");
       reloadAfterConfigChange();
     };
 
-    byId("cfg-host").addEventListener("keydown", function (e) { if (e.key === "Enter") byId("cfg-save").click(); });
+    ["cfg-host", "cfg-m3u"].forEach(function (id) {
+      byId(id).addEventListener("keydown", function (e) { if (e.key === "Enter") byId("cfg-save").click(); });
+    });
   }
 
   /* ============================================================
@@ -1171,6 +1289,9 @@
 
     // First run: ask for the portal details before trying to load anything.
     if (!STORE.isConfigured()) { openConfig(true); return; }
+
+    // M3U loads every section in one download — nothing to warm up.
+    if (API.isM3U()) return;
 
     // lazy-load the other sections in the background so counts + switching are instant
     setTimeout(function () {

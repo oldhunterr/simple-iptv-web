@@ -10,19 +10,27 @@ Migrated from the `iptv-web-main` Next.js application.
 ## Quick start
 
 1. Open **`index.html`** in any modern browser.
-2. The app asks for your portal details on first run:
+2. On first run the app asks **how to load your channels** — pick either:
+
+   **A. Xtream Codes** (portal API — gives exact live/movie/series types)
 
    | Field | Example |
    |-------|---------|
    | Portal URL | `http://your-portal.example:8080` |
    | Username | your Xtream username |
    | Password | your Xtream password |
-   | TMDB API key | *optional* — enables posters, plots, cast, episode info |
 
+   **B. M3U playlist link** (any `.m3u` / `.m3u8` URL)
+
+   | Field | Example |
+   |-------|---------|
+   | Playlist URL | `https://iptv-org.github.io/iptv/languages/ara.m3u` |
+
+   Optionally add a **TMDB API key** to get posters, plots, cast and episode info.
 3. Click **Test connection**, then **Save & Continue**. Details are stored in
    your browser (localStorage) and reused on every later visit.
 
-You can change them any time from **Connection** in the sidebar.
+Switch source any time from **Connection** in the sidebar.
 
 > Want to ship it pre-filled for your own users? Put the values in `js/config.js`
 > — they pre-fill the setup form and connect immediately.
@@ -32,10 +40,39 @@ You can change them any time from **Connection** in the sidebar.
 
 ---
 
+## M3U playlist support
+
+Point the app at any M3U/M3U8 link and it builds the catalog client-side:
+
+- **Parses** `#EXTINF` attributes — `tvg-logo`, `group-title`, `tvg-id`, `tvg-name`
+  (attributes in any order; names containing commas are handled; `#EXTGRP` and
+  `#EXTVLCOPT` lines are tolerated).
+- **Groups** become sidebar categories, with per-category item counts.
+- **Classifies** each entry into Live / Movies / Series using, in order:
+  `/movie/` or `/series/` in the URL → episode markers (`S01E01`, `1x03`) in the
+  name → movie-ish group names → VOD file extensions. Everything else is Live.
+  A group literally called "Series" is treated as Live unless the entries
+  actually look episodic — those are usually 24/7 drama channels.
+- **Groups episodes** into series: `Breaking Bad S01E01` / `S02E01` become one
+  series with proper seasons, opened in the normal series modal.
+- **Plays** HLS (`.m3u8`) via hls.js, MPEG-TS via mpegts.js, and everything else
+  via the native video element.
+
+Works with Xtream M3U exports too — `…/get.php?username=…&password=…&type=m3u_plus`
+— where `/movie/` and `/series/` paths give exact classification, and the
+VOD compatibility suffix is applied automatically.
+
+Large playlists are parsed in time-sliced chunks with a live progress readout,
+so a 100 MB / 400k-entry playlist won't freeze the tab.
+
+
+---
+
 ## What it does
 
 | Area | Details |
 |------|---------|
+| **Sources** | Xtream Codes portal **or** any M3U/M3U8 playlist link |
 | **Live TV** | All live channels, category sidebar with **per-category item counts** + category search, instant playback |
 | **Movies** | VOD catalog with details modal (plot, cast, rating, TMDB/IMDb links) |
 | **Series** | Seasons + episodes, **TMDB episode stills / titles / plots**, **Plex theme songs**, resume progress |

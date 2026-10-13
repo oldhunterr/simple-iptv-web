@@ -152,7 +152,7 @@
       <div class="content" id="content">
         <div class="loading" id="loading">
           <div class="spinner"></div>
-          <p>Loading catalog…</p>
+          <p id="loading-text">Loading catalog…</p>
         </div>
         <div class="grid" id="grid"></div>
         <div class="empty" id="empty" hidden>
@@ -241,20 +241,35 @@
   <div class="cfg-overlay" id="config-modal" hidden>
     <div class="cfg-card">
       <h2 id="cfg-title">Connect to your IPTV portal</h2>
-      <p class="muted" id="cfg-sub">Enter the Xtream Codes portal details. They are stored only in this browser.</p>
+      <p class="muted" id="cfg-sub">Choose how to load your channels. Details are stored only in this browser.</p>
 
-      <label for="cfg-host">Portal URL</label>
-      <input type="text" id="cfg-host" placeholder="http://your-portal.example:8080" autocomplete="off" spellcheck="false" />
+      <label>Source</label>
+      <div class="seg cfg-seg" id="cfg-source">
+        <button type="button" data-v="xtream" class="on">Xtream Codes</button>
+        <button type="button" data-v="m3u">M3U Playlist</button>
+      </div>
 
-      <div class="cfg-row">
-        <div>
-          <label for="cfg-user">Username</label>
-          <input type="text" id="cfg-user" placeholder="username" autocomplete="off" spellcheck="false" />
+      <div id="cfg-xtream-fields">
+        <label for="cfg-host">Portal URL</label>
+        <input type="text" id="cfg-host" placeholder="http://your-portal.example:8080" autocomplete="off" spellcheck="false" />
+
+        <div class="cfg-row">
+          <div>
+            <label for="cfg-user">Username</label>
+            <input type="text" id="cfg-user" placeholder="username" autocomplete="off" spellcheck="false" />
+          </div>
+          <div>
+            <label for="cfg-pass">Password</label>
+            <input type="password" id="cfg-pass" placeholder="password" autocomplete="off" />
+          </div>
         </div>
-        <div>
-          <label for="cfg-pass">Password</label>
-          <input type="password" id="cfg-pass" placeholder="password" autocomplete="off" />
-        </div>
+      </div>
+
+      <div id="cfg-m3u-fields" hidden>
+        <label for="cfg-m3u">M3U playlist URL</label>
+        <input type="text" id="cfg-m3u" placeholder="https://iptv-org.github.io/iptv/languages/ara.m3u" autocomplete="off" spellcheck="false" />
+        <p class="cfg-hint">A direct link to an <b>.m3u</b> / <b>.m3u8</b> playlist. Xtream links like
+          <code>…/get.php?username=…&amp;password=…&amp;type=m3u_plus</code> work too — groups become categories.</p>
       </div>
 
       <label for="cfg-tmdb">TMDB API key <span class="opt">optional — posters, plots, cast, episode info</span></label>

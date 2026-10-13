@@ -12,10 +12,17 @@
    form and to connect immediately.
    ============================================================ */
 window.IPTV_CONFIG = {
+  // --- Source: "xtream" (Xtream Codes portal) or "m3u" (playlist link) ---
+  sourceType: "xtream",
+
   // --- Xtream Codes portal (blank = ask the user) --------------
   host: "",
   username: "",
   password: "",
+
+  // --- M3U playlist link (used when sourceType === "m3u") ------
+  // e.g. "https://iptv-org.github.io/iptv/languages/ara.m3u"
+  m3uUrl: "",
 
   // --- Metadata enrichment (optional) --------------------------
   // TMDB API key — powers posters, plots, cast and episode info.

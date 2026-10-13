@@ -139,7 +139,7 @@
   // Stored separately from UI preferences so it can be reset on its own.
   // Loaded immediately (below) so the API layer sees it before first use.
   var PORTAL_KEY = "simple_iptv_portal_v1";
-  var PORTAL_FIELDS = ["host", "username", "password", "tmdbApiKey", "vodWafBypass", "themeSongs", "language"];
+  var PORTAL_FIELDS = ["sourceType", "host", "username", "password", "m3uUrl", "tmdbApiKey", "vodWafBypass", "themeSongs", "language"];
 
   function getConfig() {
     var out = {};
@@ -161,6 +161,9 @@
 
   function isConfigured() {
     var c = window.IPTV_CONFIG;
+    if (String(c.sourceType || "xtream") === "m3u") {
+      return !!(c.m3uUrl && String(c.m3uUrl).trim());
+    }
     return !!(c.host && String(c.host).trim() && c.username && String(c.username).trim());
   }
 

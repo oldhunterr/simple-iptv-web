@@ -42,7 +42,11 @@
   function cacheSet(key, data, ttlMs) {
     var entry = { data: data, exp: Date.now() + (ttlMs || 3600000) };
     _mem[key] = entry;
-    try { localStorage.setItem(LS_PREFIX + key, JSON.stringify(entry)); } catch (err) {}
+    try {
+      var json = JSON.stringify(entry);
+      if (json.length > 2 * 1024 * 1024) return;   // too big for localStorage — keep in memory only
+      localStorage.setItem(LS_PREFIX + key, json);
+    } catch (err) {}
   }
 
   function cacheClear() {
@@ -135,8 +139,10 @@
      form when a portal turns out to need (or reject) the workaround. */
   function alternateStreamUrl(url, type) {
     if (type === "live") return url;
-    if (/%20$/.test(url)) return url.replace(/%20$/, "");
-    return url + "%20";
+    if (new RegExp("\\.(?:" + VOD_EXT + ")%20(\\?|$)", "i").test(url)) return stripWafBypass(url);
+    if (/%20(\?|$)/.test(url)) return url.replace(/%20(\?|$)/, "$1");
+    var w = applyWafBypass(url);
+    return w !== url ? w : url + "%20";
   }
 
   /* ---------------------------------------------------------------
@@ -291,6 +297,220 @@
   }
 
   /* ---------------------------------------------------------------
+     M3U / M3U8 playlists
+     --------------------------------------------------------------- */
+  var SXXEXX = /\b[Ss](\d{1,2})\s*[Ee](\d{1,3})\b/;
+  var SXXEXX_X = /\b(\d{1,2})x(\d{2,3})\b/;
+  var VOD_EXT = "mp4|mkv|avi|mov|m4v|webm|wmv";
+
+  function isM3U() { return String(cfg.sourceType || "xtream") === "m3u"; }
+  function m3uSourceUrl() { return String(cfg.m3uUrl || "").trim(); }
+
+  function hashStr(s) {
+    var h = 0, i;
+    for (i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+    return "m" + (h >>> 0).toString(36);
+  }
+
+  function slug(s) {
+    return String(s || "").toLowerCase()
+      .replace(/[^a-z0-9\u0600-\u06FF]+/g, "-")
+      .replace(/^-+|-+$/g, "").slice(0, 70) || "x";
+  }
+
+  function extOf(url) {
+    var m = String(url).split("?")[0].match(/\.([a-z0-9]{2,5})$/i);
+    return m ? m[1].toLowerCase() : "";
+  }
+
+  /* Insert/remove the WAF-bypass suffix on an already-complete stream URL
+     (used for M3U entries, whose URLs are given in full). */
+  function applyWafBypass(url) {
+    if (cfg.vodWafBypass === false) return url;
+    var s = String(url);
+    if (!/\/(movie|series)\//i.test(s)) return url;      // live/M3U URLs untouched
+    var m = s.match(new RegExp("^(.*?\\.(?:" + VOD_EXT + "))(\\?.*)?$", "i"));
+    if (!m) return url;
+    if (/%20$/i.test(m[1])) return url;
+    return m[1] + "%20" + (m[2] || "");
+  }
+
+  function stripWafBypass(url) {
+    return String(url).replace(new RegExp("(\\.(?:" + VOD_EXT + "))%20(\\?|$)", "i"), "$1$2");
+  }
+
+  function parseExtinf(line) {
+    var e = { name: "", logo: "", group: "", tvgId: "", tvgName: "" };
+    var re = /([A-Za-z0-9_-]+)="([^"]*)"/g, m;
+    while ((m = re.exec(line)) !== null) {
+      var k = m[1].toLowerCase();
+      if (k === "tvg-logo") e.logo = m[2];
+      else if (k === "group-title") e.group = m[2];
+      else if (k === "tvg-id") e.tvgId = m[2];
+      else if (k === "tvg-name") e.tvgName = m[2];
+    }
+    // The display name is everything after the first comma that is outside quotes.
+    var inQ = false, cut = -1, i;
+    for (i = 0; i < line.length; i++) {
+      var c = line.charAt(i);
+      if (c === '"') inQ = !inQ;
+      else if (c === "," && !inQ) { cut = i; break; }
+    }
+    if (cut >= 0) e.name = line.slice(cut + 1).trim();
+    if (!e.name) e.name = e.tvgName || e.tvgId || "Unnamed";
+    return e;
+  }
+
+  /* Time-sliced parse so huge playlists don't freeze the UI. */
+  function parseM3U(text, onProgress) {
+    return new Promise(function (resolve) {
+      var entries = [], cur = null, i = 0, len = text.length;
+      function step() {
+        var t0 = Date.now();
+        while (i < len && Date.now() - t0 < 25) {
+          var nl = text.indexOf("\n", i);
+          if (nl === -1) nl = len;
+          var line = text.slice(i, nl);
+          i = nl + 1;
+          if (line.length && line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1);
+          if (!line) continue;
+          if (line.charCodeAt(0) === 35) {                       // '#'
+            if (line.lastIndexOf("#EXTINF:", 0) === 0) cur = parseExtinf(line);
+            continue;                                            // skip #EXTGRP/#EXTVLCOPT
+          }
+          var u = line.trim();
+          if (!u) continue;
+          if (cur) { cur.url = u; entries.push(cur); cur = null; }
+          else entries.push({ name: "", logo: "", group: "", url: u });
+        }
+        if (onProgress) onProgress(len ? i / len : 1, entries.length);
+        if (i < len) setTimeout(step, 0);
+        else resolve(entries);
+      }
+      step();
+    });
+  }
+
+  function classifyEntry(e) {
+    var url = e.url || "", name = e.name || "", grp = String(e.group || "").toLowerCase();
+    if (/\/movie\//i.test(url)) return "movies";
+    if (/\/series\//i.test(url)) return "series";
+    // Only treat something as a series if it actually looks episodic — a group
+    // called "Series" is usually just 24/7 drama channels, not episodes.
+    if (SXXEXX.test(name) || SXXEXX_X.test(name)) return "series";
+    if (/(movie|film|cinema|vod|أفلام|افلام)/.test(grp)) return "movies";
+    if (new RegExp("\\.(" + VOD_EXT + ")(\\?|$)", "i").test(url)) return "movies";
+    return "live";
+  }
+
+  function parseEpisodeName(name) {
+    var m = name.match(SXXEXX) || name.match(SXXEXX_X);
+    if (!m) return null;
+    var idx = m.index;
+    return {
+      series: name.slice(0, idx).replace(/[\s._\-–]+$/, "").trim() || name,
+      season: parseInt(m[1], 10),
+      episode: parseInt(m[2], 10),
+      epTitle: name.slice(idx + m[0].length).replace(/^[\s._\-–:]+/, "").trim()
+    };
+  }
+
+  /* Turn parsed entries into the same {cats, items} shape the UI expects. */
+  function buildM3UCatalog(entries) {
+    var out = {
+      live: { cats: [], items: [] },
+      movies: { cats: [], items: [] },
+      series: { cats: [], items: [] }
+    };
+    var seen = { live: {}, movies: {}, series: {} };
+    var seriesMap = {}, seriesOrder = [];
+
+    function catFor(section, name) {
+      var n = name || "Uncategorised";
+      var id = slug(n);
+      if (!seen[section][id]) {
+        seen[section][id] = { category_id: id, category_name: n };
+        out[section].cats.push(seen[section][id]);
+      }
+      return id;
+    }
+
+    entries.forEach(function (e) {
+      if (!e.url) return;
+      var kind = classifyEntry(e);
+      var catId = catFor(kind, e.group);
+      var title = e.name || e.url;
+
+      if (kind === "series") {
+        var p = parseEpisodeName(title);
+        var sName = p ? p.series : title;
+        var sid = "m3u-" + slug(sName);
+        var s = seriesMap[sid];
+        if (!s) {
+          s = seriesMap[sid] = {
+            id: sid, series_id: sid, title: sName, name: sName, type: "series",
+            poster: e.logo, cover: e.logo, category_id: catId,
+            genre: e.group || "", m3u_episodes: [], raw: { name: sName, series_id: sid, category_id: catId, cover: e.logo }
+          };
+          seriesOrder.push(sid);
+        }
+        if (!s.cover && e.logo) { s.cover = e.logo; s.poster = e.logo; }
+        s.m3u_episodes.push({
+          id: hashStr(e.url), stream_url: e.url,
+          episode_num: p ? p.episode : s.m3u_episodes.length + 1,
+          season_num: p ? p.season : 1,
+          title: (p && p.epTitle) ? p.epTitle : title,
+          container_extension: extOf(e.url) || "mp4",
+          info: { movie_image: e.logo, cover_big: e.logo }
+        });
+        return;
+      }
+
+      var isMovie = kind === "movies";
+      out[kind].items.push({
+        id: hashStr(e.url), stream_id: hashStr(e.url), stream_url: e.url,
+        title: title, name: title, type: isMovie ? "movies" : "live",
+        poster: e.logo, stream_icon: e.logo, category_id: catId,
+        genre: e.group || "",
+        container_extension: extOf(e.url) || (isMovie ? "mp4" : "ts"),
+        raw: e
+      });
+    });
+
+    seriesOrder.forEach(function (sid) { out.series.items.push(seriesMap[sid]); });
+    return out;
+  }
+
+  /* Download + parse a playlist, cached in memory for the session. */
+  function loadM3UPlaylist(force, onProgress) {
+    var url = m3uSourceUrl();
+    if (!url) return Promise.reject(new Error("No M3U playlist URL configured."));
+    var key = "m3u:" + url;
+    if (!force) {
+      var hit = cacheGet(key);
+      if (hit !== undefined) return Promise.resolve(hit);
+    }
+    if (onProgress) onProgress(-1, 0, "Downloading playlist…");
+    return fetch(url, { headers: { Accept: "*/*" } })
+      .then(function (r) {
+        if (!r.ok) throw new Error("Playlist request failed (HTTP " + r.status + ")");
+        return r.text();
+      })
+      .then(function (text) {
+        if (!text || text.indexOf("#EXTM3U") === -1)
+          throw new Error("That URL did not return an M3U playlist.");
+        return parseM3U(text, function (frac, count) {
+          if (onProgress) onProgress(frac, count, "Parsing playlist…");
+        });
+      })
+      .then(function (entries) {
+        var catalog = buildM3UCatalog(entries);
+        cacheSet(key, catalog, 6 * 3600e3);          // memory-first (too big for localStorage)
+        return catalog;
+      });
+  }
+
+  /* ---------------------------------------------------------------
      Normalisation of catalog items (mirrors types/iptv normalizeCatalogItem)
      --------------------------------------------------------------- */
   function normalizeItem(raw, type) {
@@ -339,8 +559,42 @@
     findBestMatch: findBestMatch,
     normalizeItem: normalizeItem,
 
-    /* Verify portal credentials — returns {ok, message, info}. */
+    /* M3U source */
+    isM3U: isM3U,
+    m3uSourceUrl: m3uSourceUrl,
+    loadM3UPlaylist: loadM3UPlaylist,
+    parseM3U: parseM3U,
+    buildM3UCatalog: buildM3UCatalog,
+    applyWafBypass: applyWafBypass,
+    hashStr: hashStr,
+
+    /* Verify the configured source — returns {ok, message, info}. */
     testConnection: function (override) {
+      var srcType = (override && override.sourceType) || cfg.sourceType || "xtream";
+
+      if (srcType === "m3u") {
+        var purl = String((override && override.m3uUrl) || cfg.m3uUrl || "").trim();
+        if (!purl) return Promise.resolve({ ok: false, message: "Enter an M3U playlist URL." });
+        return fetch(purl, { headers: { Accept: "*/*" } })
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.text();
+          })
+          .then(function (text) {
+            if (!text || text.indexOf("#EXTM3U") === -1)
+              return { ok: false, message: "That URL is reachable but is not an M3U playlist." };
+            var n = (text.match(/#EXTINF/g) || []).length;
+            var g = {};
+            var re = /group-title="([^"]*)"/g, m;
+            while ((m = re.exec(text)) !== null) g[m[1]] = 1;
+            return { ok: true, message: "Playlist OK — " + n.toLocaleString() + " entries, " +
+              Object.keys(g).length + " groups" };
+          })
+          .catch(function (err) {
+            return { ok: false, message: "Could not load the playlist: " + (err.message || err) };
+          });
+      }
+
       var host = normalizeHost((override && override.host) || cfg.host);
       var user = (override && override.username) || cfg.username;
       var pass = (override && override.password) || cfg.password;
